@@ -2,18 +2,17 @@ package es.uniovi.amigos
 
 import ShowAmigosTask
 import android.Manifest
-import android.app.AlertDialog
 import android.content.Context
-import android.content.DialogInterface
 import android.content.pm.PackageManager
 import android.location.Criteria
 import android.location.Location
-import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Bundle
 import android.preference.PreferenceManager
 import android.view.View
+import android.widget.Button
 import android.widget.EditText
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -22,18 +21,23 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-import java.util.Timer
-import java.util.TimerTask
 
 
 class MainActivity : AppCompatActivity() {
     private val REQUEST_PERMISSIONS_REQUEST_CODE = 1
     private var map: MapView? = null // Este atributo guarda una referencia al objeto MapView a través del cual podremos manipular el mapa que se muestre
 
-    val LIST_URL = "http://192.168.56.1:5094/api/amigo" // URL del servicio REST que proporciona la lista de amigos
-    private val UPDATE_PERIOD = 10000L // 10 segundos
+    // URLs para el servicio REST
+    //val LIST_URL = "http://10.0.2.2:5094/api/amigo" // URL para emulador
+    val LIST_URL = "https://1ff9-37-35-182-169.ngrok-free.app/api/amigo" // URL proporcionada por ngrok para implementar HTTPS
 
-    var mUserName: String = null.toString() // Nombre del usuario
+    // Nombre del usuario
+    var mUserName: String? = null
+
+    // Botón y EditText para establecer el nombre de usuario
+    private lateinit var btnsetusername: Button
+    private lateinit var usernameInput: EditText
+
 
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,35 +46,68 @@ class MainActivity : AppCompatActivity() {
         val ctx = applicationContext
         Configuration.getInstance().load(ctx, PreferenceManager.getDefaultSharedPreferences(ctx))
 
+        // Solicitar al usuario los permisos "peligrosos". El usuario debe autorizarlos
+        // Cuando los autorice, Android llamará a la función onRequestPermissionsResult
+        // que implementamos más adelante
+        requestPermissionsIfNecessary(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+                Manifest.permission.ACCESS_NETWORK_STATE,
+                Manifest.permission.INTERNET,
+            )
+        )
+
         // Crear el mapa desde el layout y asignarle la fuente de la que descargará las imágenes del mapa
         setContentView(R.layout.activity_main)
         map = findViewById<View>(R.id.map) as MapView
         map!!.setTileSource(TileSourceFactory.MAPNIK)
 
-        // Solicitar al usuario los permisos "peligrosos". El usuario debe autorizarlos
-        // Cuando los autorice, Android llamará a la función onRequestPermissionsResult
-        // que implementamos más adelante
-        requestPermissionsIfNecessary(
-            arrayOf( // WRITE_EXTERNAL_STORAGE este permiso es necesario para guardar las imagenes del mapa
-                Manifest.permission.WRITE_EXTERNAL_STORAGE, Manifest.permission.ACCESS_FINE_LOCATION
-            )
-        )
-
-        centerMapOnEurope() // centrar el mapa en Europa
+        // Centrar el mapa en Europa
+        centerMapOnEurope()
         //addMarker(40.416775, -3.703790, "Madrid") // marcador de prueba
 
-        // Actualizar la posicion de los amigos periodicamente
-        val timer: Timer = Timer()
-        val updateAmigos: TimerTask = UpdateAmigosPosition(this@MainActivity)
-        timer.scheduleAtFixedRate(updateAmigos, 0, UPDATE_PERIOD)
+        // Obtener la posicion de los amigos.
+        ShowAmigosTask(this).execute(this.LIST_URL)
 
-        // Pregunta nombre al usuario. Usaremos Juan (usuario ya creado en la base de datos que puede actualizar su ubicación)
-        askUserName()
+        // Definimos boton y cuadro de texto para establecer el nombre de usuario
+        btnsetusername = findViewById(R.id.btn_set_username)
+        usernameInput = findViewById(R.id.username_input)
 
-        // Actualiza la posicion del usuario actual (cada vez que el telefono se mueva mas de 10 metros)
-        SetupLocation()
+        // Asignamos la acción al botón
+        btnsetusername.setOnClickListener {
+            // Mostrar el cuadro de texto
+            usernameInput.visibility = View.VISIBLE
+            usernameInput.requestFocus()
+
+            // Mostrar el teclado
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(usernameInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+
+            // Cambiamos el texto del boton: ahora indica que sirve para guardar el nombre
+            btnsetusername.text = getString(R.string.save_name)
+
+            // Cambiamos el comportamiento del boton
+            btnsetusername.setOnClickListener {
+                // Guardar el nombre si es válido
+                val name = usernameInput.text.toString()
+
+                if (name.isNotBlank()) {
+                    mUserName = name
+                    Toast.makeText(this, "Name saved: $name", Toast.LENGTH_SHORT).show()
+                    usernameInput.visibility = View.GONE
+                    // Si ya tenemos permisos, iniciar SetupLocation
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
+                        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                        SetupLocation()
+                    }
+
+                } else {
+                    Toast.makeText(this, "Introduce a valid name", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
-
 
     public override fun onResume() {
         super.onResume()
@@ -87,19 +124,16 @@ class MainActivity : AppCompatActivity() {
         permissions: Array<String>,
         grantResults: IntArray
     ) {
-        // Esta función será invocada cuando el usuario conceda los permisos
-        // De momento hay que dejarla como está
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        val permissionsToRequest = ArrayList<String>()
-        for (i in grantResults.indices) {
-            permissionsToRequest.add(permissions[i])
-        }
-        if (permissionsToRequest.size > 0) {
-            ActivityCompat.requestPermissions(
-                this,
-                permissionsToRequest.toTypedArray<String>(),
-                REQUEST_PERMISSIONS_REQUEST_CODE
-            )
+
+        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+            Toast.makeText(this, "Permissiongs granted", Toast.LENGTH_SHORT).show()
+            // Aquí puedes iniciar SetupLocation si el nombre ya está definido
+            if (mUserName != null) {
+                SetupLocation()
+            }
+        } else {
+            Toast.makeText(this, "Permissiongs are needed to obtain location", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -143,14 +177,6 @@ class MainActivity : AppCompatActivity() {
         map!!.overlays.add(startMarker)
     }
 
-
-    // Esta funcion es llamada periodicamente para actualizar la posicion de los amigos en onCreate
-    class UpdateAmigosPosition(private val activity: MainActivity) : TimerTask() {
-        override fun run() {
-            ShowAmigosTask(activity).execute(activity.LIST_URL)
-        }
-    }
-
     // Esta funcion es llamada finalmente por la tarea asincrona (onPostExecute) para añadir chinchetas al mapa
     fun updateMap(friendsList: List<Amigo>) {
         map!!.getOverlays().clear(); // borrar chinchetas previas
@@ -163,33 +189,7 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    // Esta funcion es llamada para que el usuario introduzca su nombre
-    fun askUserName() {
-        val alert: AlertDialog.Builder = AlertDialog.Builder(this)
-
-        alert.setTitle("Settings")
-        alert.setMessage("User name:")
-
-        // Crear un EditText para obtener el nombre
-        val input: EditText = EditText(this)
-        alert.setView(input)
-
-        alert.setPositiveButton("Ok", object : DialogInterface.OnClickListener {
-            override fun onClick(dialog: DialogInterface?, whichButton: Int) {
-                mUserName = input.getText().toString()
-            }
-        })
-
-        alert.setNegativeButton("Cancel", object : DialogInterface.OnClickListener {
-            override fun onClick(dialog: DialogInterface?, whichButton: Int) {
-                // Canceled.
-            }
-        })
-
-        alert.show()
-    }
-
-
+    // Esta funcion se utiliza para actualizar la localizacion del usuario
     fun SetupLocation() {
         if ((ActivityCompat.checkSelfPermission(
                 this,

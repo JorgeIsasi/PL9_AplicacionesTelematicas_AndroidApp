@@ -11,9 +11,12 @@ class MyLocationListener(private val activity: MainActivity) : LocationListener 
         val longi: Double = location.getLongitude()
         val lati: Double = location.getLatitude()
 
+        // Capturamos en una variable local segura
+        val name: String = activity.mUserName ?: return
+
         // Llama a la AsyncTask UpdatePositionTask pasando la URL adecuada
-        val url = "${activity.LIST_URL}/${activity.mUserName}"
-        UpdatePositionTask(activity, activity.mUserName, longi, lati).execute(url)
+        val url = "${activity.LIST_URL}/name/${activity.mUserName}"
+        UpdatePositionTask(activity, name, longi, lati).execute(url)
     }
 
     // El resto de métodos que debemos implementar los podemos dejar vacíos
