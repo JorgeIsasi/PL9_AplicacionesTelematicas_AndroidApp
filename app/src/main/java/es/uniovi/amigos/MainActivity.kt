@@ -2,13 +2,17 @@ package es.uniovi.amigos
 
 import ShowAmigosTask
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
 import android.os.Bundle
 import android.preference.PreferenceManager
+import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -16,12 +20,21 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
-
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
     private val REQUEST_PERMISSIONS_REQUEST_CODE = 1
@@ -29,7 +42,7 @@ class MainActivity : AppCompatActivity() {
 
     // URLs para el servicio REST
     //val LIST_URL = "http://10.0.2.2:5094/api/amigo" // URL para emulador
-    val LIST_URL = "https://1ff9-37-35-182-169.ngrok-free.app/api/amigo" // URL proporcionada por ngrok para implementar HTTPS
+    val LIST_URL = "https://a71c-37-35-182-169.ngrok-free.app/api/amigo" // URL proporcionada por ngrok para implementar HTTPS
 
     // Nombre del usuario
     var mUserName: String? = null
@@ -37,7 +50,6 @@ class MainActivity : AppCompatActivity() {
     // Botón y EditText para establecer el nombre de usuario
     private lateinit var btnsetusername: Button
     private lateinit var usernameInput: EditText
-
 
     public override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -94,14 +106,15 @@ class MainActivity : AppCompatActivity() {
 
                 if (name.isNotBlank()) {
                     mUserName = name
-                    Toast.makeText(this, "Name saved: $name", Toast.LENGTH_SHORT).show()
-                    usernameInput.visibility = View.GONE
-                    // Si ya tenemos permisos, iniciar SetupLocation
-                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED &&
-                        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                        SetupLocation()
+                    sendTokenToServer(name) { success ->
+                        if (success) {
+                            Toast.makeText(this, "Name saved: $name", Toast.LENGTH_SHORT).show()
+                            usernameInput.visibility = View.GONE
+                            SetupLocation() // solo cuando el token ya está registrado
+                        } else {
+                            Toast.makeText(this, "Error al registrar token", Toast.LENGTH_SHORT).show()
+                        }
                     }
-
                 } else {
                     Toast.makeText(this, "Introduce a valid name", Toast.LENGTH_SHORT).show()
                 }
@@ -109,14 +122,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private val locationUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            // Aquí llamas a tu lógica de actualización
+            ShowAmigosTask(this@MainActivity).execute(LIST_URL)
+        }
+    }
+
     public override fun onResume() {
         super.onResume()
         map!!.onResume()
+
+        val filter = IntentFilter("LOCATION_UPDATED")
+        LocalBroadcastManager.getInstance(this).registerReceiver(locationUpdateReceiver, filter)
     }
 
     public override fun onPause() {
         super.onPause()
         map!!.onPause()
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(locationUpdateReceiver)
     }
 
     override fun onRequestPermissionsResult(
@@ -158,7 +182,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
     private fun centerMapOnEurope() {
         // Esta función mueve el centro del mapa a Paris y ajusta el zoom
         // para que se vea Europa
@@ -173,7 +196,7 @@ class MainActivity : AppCompatActivity() {
         val startMarker = Marker(map)
         startMarker.position = coords
         startMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-        startMarker.title = name
+        startMarker.title = "$name\nLat: $latitud\nLon: $longitud"
         map!!.overlays.add(startMarker)
     }
 
@@ -215,7 +238,7 @@ class MainActivity : AppCompatActivity() {
         val criteria: Criteria = Criteria()
         val provider: String = locationManager.getBestProvider(criteria, false).toString()
 
-        // Se crea un listener de la clase que se va a definir luego
+        // Se crea un listener de la clase que hemos implementado
         val locationListener: MyLocationListener = MyLocationListener(this)
 
         // Se registra el listener con el Location Manager para recibir actualizaciones
@@ -228,6 +251,39 @@ class MainActivity : AppCompatActivity() {
             // La posición actual es location
         } else {
             // Actualmente no se puede obtener la posición
+        }
+    }
+
+    fun sendTokenToServer(nombre: String, callback: (Boolean) -> Unit) {
+        val prefs = getSharedPreferences("prefs", Context.MODE_PRIVATE)
+        val token = prefs.getString("fcm_token", null)
+
+        if (token != null) {
+            val json = JSONObject()
+            json.put("nombre", nombre)
+            json.put("token", token)
+
+            val requestBody = json.toString().toRequestBody("application/json".toMediaType())
+            val client = OkHttpClient()
+
+            val request = Request.Builder()
+                .url("${this.LIST_URL}/register-token")
+                .put(requestBody)
+                .build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    Log.e("FCM", "Error al enviar token", e)
+                    runOnUiThread { callback(false) }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    Log.d("FCM", "Respuesta del server: ${response.code}")
+                    runOnUiThread { callback(response.isSuccessful) }
+                }
+            })
+        } else {
+            callback(false)
         }
     }
 }

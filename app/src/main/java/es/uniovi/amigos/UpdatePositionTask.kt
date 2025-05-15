@@ -36,7 +36,7 @@ class UpdatePositionTask(private val activity: MainActivity, private val name: S
     }
 
     @Throws(IOException::class, JSONException::class)
-    protected fun sendPutRequest(URL: String?, name: String, lati: Double, longi: Double): String? {
+    protected fun sendPutRequest(URL: String?, name: String, longi: Double, lati: Double): String? {
         val url = URL(URL)
         val httpCon = url.openConnection() as HttpURLConnection
         httpCon.readTimeout = 10000
@@ -47,7 +47,7 @@ class UpdatePositionTask(private val activity: MainActivity, private val name: S
         httpCon.requestMethod = "PUT"
 
         val out = OutputStreamWriter(httpCon.outputStream)
-        val jObjSent = "{\"name\":\"$name\",\"lati\":\"$lati\",\"longi\":\"$longi\"}"
+        val jObjSent = "{\"name\":\"$name\",\"longi\":\"$longi\",\"lati\":\"$lati\"}"
         out.write(jObjSent)
         out.close()
 

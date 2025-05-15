@@ -1,8 +1,8 @@
+import android.content.Context
 import android.os.AsyncTask
 import android.util.Log
 import android.widget.Toast
 import es.uniovi.amigos.Amigo
-import es.uniovi.amigos.MainActivity
 import org.json.JSONArray
 import org.json.JSONException
 import java.io.BufferedReader
@@ -11,6 +11,7 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import es.uniovi.amigos.MainActivity
 
 class ShowAmigosTask(private val activity: MainActivity) : AsyncTask<String, Void, String?>() {
     override fun doInBackground(vararg urls: String): String? {

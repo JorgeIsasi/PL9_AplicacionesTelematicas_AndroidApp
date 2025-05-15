@@ -8,8 +8,8 @@ import android.os.Bundle
 class MyLocationListener(private val activity: MainActivity) : LocationListener {
     override fun onLocationChanged(location: Location) { // Se llama cuando hay una nueva posición para ese location provider
         // Se obtiene la latitud y longitud
-        val longi: Double = location.getLongitude()
         val lati: Double = location.getLatitude()
+        val longi: Double = location.getLongitude()
 
         // Capturamos en una variable local segura
         val name: String = activity.mUserName ?: return
